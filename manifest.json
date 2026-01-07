@@ -1,0 +1,18 @@
+{
+  "short_name": "StocOffline",
+  "name": "Gestiune Produse Offline",
+  "description": "Aplicatie pentru gestionarea stocurilor si a termenelor de expirare",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1554/1554561.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "scope": "./",
+  "theme_color": "#007bff"
+}
