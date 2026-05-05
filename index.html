@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Farma Pro v10.27.1 - RX Precision</title>
+    
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        :root { --primary: #0f172a; --accent: #2563eb; --bg: #f1f5f9; --sale: #10b981; --rx: #9333ea; --danger: #dc2626; }
+        body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--primary); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        .nav-tabs { background: var(--primary); display: flex; border-bottom: 3px solid var(--accent); flex-shrink: 0; overflow-x: auto; }
+        .tab-btn { flex: 1; padding: 15px; border: none; background: none; color: white; font-weight: bold; cursor: pointer; opacity: 0.6; font-size: 10px; white-space: nowrap; }
+        .tab-btn.active { opacity: 1; border-bottom: 3px solid white; }
+
+        .view-container { flex: 1; display: none; overflow-y: auto; padding: 10px; }
+        .view-container.active { display: block; }
+
+        /* Stil Reteta BizPharma Inspired */
+        .rx-header { background: white; padding: 15px; border-radius: 12px; border: 2px solid var(--rx); margin-bottom: 10px; font-size: 13px; }
+        .rx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .rx-input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+        
+        .pos-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; margin-top: 10px; }
+        .pos-table th { background: #f1f5f9; padding: 10px; font-size: 11px; text-align: left; }
+        .pos-table td { padding: 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+
+        .cart-summary { background: white; border-top: 4px solid var(--rx); padding: 15px; position: sticky; bottom: 0; box-shadow: 0 -5px 15px rgba(0,0,0,0.1); }
+        .total-line { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+        .grand-total { font-size: 24px; font-weight: 900; color: var(--rx); border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px; }
+
+        .btn { padding: 12px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; color: white; }
+        .btn-rx { background: var(--rx); width: 100%; font-size: 18px; margin-top: 10px; }
+        .input-qty { width: 45px; padding: 8px; border: 2px solid #e2e8f0; border-radius: 6px; text-align: center; font-weight: bold; }
+        
+        .search-box { width: 100%; padding: 14px; border-radius: 12px; border: 2px solid var(--accent); margin-bottom: 10px; box-sizing: border-box; font-size: 16px; }
+    </style>
+</head>
+<body>
+
+<div class="nav-tabs">
+    <button class="tab-btn active" onclick="showView('gestiune', this)">⚙️ GESTIUNE</button>
+    <button class="tab-btn" onclick="showView('reteta', this)">📄 REȚETĂ (RX)</button>
+    <button class="tab-btn" onclick="showView('istoric', this)">📜 ISTORIC / RAPORT</button>
+</div>
+
+<div id="reteta" class="view-container">
+    <div class="rx-header">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+            <strong style="color:var(--rx)">REȚETĂ ELECTRONICĂ</strong>
+            <small id="rxDate" style="color:#64748b"></small>
+        </div>
+        <div class="rx-grid">
+            <input type="text" id="rxMedic" class="rx-input" placeholder="Medic (ex: MIHAI MIRELA)">
+            <input type="text" id="rxParafa" class="rx-input" placeholder="Parafă (ex: E39156)">
+            <input type="text" id="rxSerie" class="rx-input" placeholder="Serie Rețetă">
+            <select id="rxComp" class="rx-input" onchange="updateRXUI()">
+                <option value="0">Fără Compensare (0%)</option>
+                <option value="50">Compensat 50%</option>
+                <option value="90">Compensat 90%</option>
+                <option value="100">Gratuit (100%)</option>
+            </select>
+        </div>
+    </div>
+
+    <input type="text" class="search-box" placeholder="🔎 Caută medicament în stoc..." oninput="renderRXList(this.value)">
+    
+    <table class="pos-table">
+        <thead>
+            <tr>
+                <th>Produs / Pret</th>
+                <th width="50">UT</th>
+                <th width="50">Fract.</th>
+                <th width="40"></th>
+            </tr>
+        </thead>
+        <tbody id="rxBody"></tbody>
+    </table>
+
+    <div class="cart-summary">
+        <div id="rxCartItems" style="max-height: 100px; overflow-y: auto; font-size: 12px; margin-bottom:10px"></div>
+        <div class="total-line"><span>Valoare Amănunt:</span> <span id="vAm">0.00 RON</span></div>
+        <div class="total-line" style="color:var(--sale)"><span>Valoare Compensată:</span> <span id="vComp">0.00 RON</span></div>
+        <div class="total-line grand-total"><span>DE PLATĂ:</span> <span id="vPlata">0.00 RON</span></div>
+        <button class="btn btn-rx" onclick="finalizeazaReteta()">ELIBEREAZĂ & SCADE STOC</button>
+    </div>
+</div>
+
+<div id="gestiune" class="view-container active">
+    <div style="display:flex; gap:5px; margin-bottom:10px">
+        <button class="btn" style="background:var(--accent); flex:1" onclick="addProd()">+ PRODUS NOU</button>
+        <button class="btn" style="background:#64748b; flex:1" onclick="document.getElementById('fIn').click()">📥 IMPORT EXCEL</button>
+    </div>
+    <input type="text" class="search-box" placeholder="🔎 Caută în gestiune..." oninput="renderGest(this.value)">
+    <div id="gestList"></div>
+</div>
+
+<div id="istoric" class="view-container">
+    <button class="btn" style="background:var(--accent); width:100%; margin-bottom:15px" onclick="exportPDF()">📄 EXPORT RAPORT DETALII BON</button>
+    <div id="histList"></div>
+</div>
+
+<input type="file" id="fIn" style="display:none" onchange="importExcel(event)">
+
+<script>
+    const db = new Dexie("FarmaPreciseDB");
+    db.version(1).stores({
+        produse: '++id, nume, cant, amb, pret',
+        vanzari: '++id, data, detalii, total, comp'
+    });
+
+    let dataCache = [], rxCart = [];
+    document.getElementById('rxDate').innerText = new Date().toLocaleString('ro-RO');
+
+    async function load() {
+        dataCache = await db.produse.toArray();
+        renderGest();
+        renderRXList();
+        renderHist();
+    }
+
+    function showView(viewId, btn) {
+        document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+        btn.classList.add('active');
+    }
+
+    // --- LOGICA REȚETĂ (CALCUL BIZPHARMA) ---
+    function renderRXList(q = "") {
+        const body = document.getElementById('rxBody');
+        const filtered = dataCache.filter(p => p.nume.toLowerCase().includes(q.toLowerCase()));
+        body.innerHTML = filtered.map(p => `
+            <tr>
+                <td><small>${p.nume}</small><br><b>${p.pret.toFixed(2)}</b></td>
+                <td><input type="number" id="i-${p.id}" class="input-qty" value="0"></td>
+                <td><input type="number" id="f-${p.id}" class="input-qty" style="color:blue" value="0"></td>
+                <td><button class="btn" style="background:var(--rx); padding:8px" onclick="addRX(${p.id})">+</button></td>
+            </tr>
+        `).join('');
+    }
+
+    function addRX(id) {
+        const p = dataCache.find(x => x.id === id);
+        const cInt = parseInt(document.getElementById(`i-${id}`).value) || 0;
+        const cFrac = parseInt(document.getElementById(`f-${id}`).value) || 0;
+        if(cInt === 0 && cFrac === 0) return;
+
+        const valAm = (cInt * p.pret) + (cFrac * (p.pret / p.amb));
+        rxCart.push({ id: p.id, nume: p.nume, cInt, cFrac, valAm, amb: p.amb });
+        updateRXUI();
+    }
+
+    function updateRXUI() {
+        const display = document.getElementById('rxCartItems');
+        const procComp = parseInt(document.getElementById('rxComp').value);
+        let totalAm = 0;
+        
+        display.innerHTML = rxCart.map((item, idx) => {
+            totalAm += item.valAm;
+            return `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px dashed #eee">
+                <span>${item.nume} (${item.cInt}c+${item.cFrac}u)</span>
+                <span>${item.valAm.toFixed(2)} <button onclick="rxCart.splice(${idx},1); updateRXUI()" style="color:red; background:none; border:none">X</button></span>
+            </div>`;
+        }).join('');
+
+        const valComp = (totalAm * procComp) / 100;
+        document.getElementById('vAm').innerText = totalAm.toFixed(2) + " RON";
+        document.getElementById('vComp').innerText = valComp.toFixed(2) + " RON";
+        document.getElementById('vPlata').innerText = (totalAm - valComp).toFixed(2) + " RON";
+    }
+
+    async function finalizeazaReteta() {
+        if(rxCart.length === 0) return;
+        const medic = document.getElementById('rxMedic').value || "Nespecificat";
+        const parafa = document.getElementById('rxParafa').value || "Fără Parafă";
+        let totalFinal = 0;
+        let logText = `Medic: ${medic} (${parafa}) - `;
+
+        for(let item of rxCart) {
+            const p = await db.produse.get(item.id);
+            const scadereUnitara = item.cInt + (item.cFrac / item.amb);
+            await db.produse.update(item.id, { cant: p.cant - scadereUnitara });
+            totalFinal += item.valAm;
+            logText += `${item.nume}(${item.cInt}+${item.cFrac}), `;
+        }
+
+        const procComp = parseInt(document.getElementById('rxComp').value);
+        const plataEfectiva = totalFinal - (totalFinal * procComp / 100);
+
+        await db.vanzari.add({
+            data: new Date().toLocaleString('ro-RO'),
+            detalii: logText,
+            total: plataEfectiva,
+            comp: totalFinal * procComp / 100
+        });
+
+        rxCart = []; updateRXUI(); load();
+        alert("Rețetă eliberată cu succes! Stocul a fost actualizat.");
+    }
+
+    // --- GESTIUNE ---
+    function renderGest(q = "") {
+        const list = document.getElementById('gestList');
+        const filtered = dataCache.filter(p => p.nume.toLowerCase().includes(q.toLowerCase()));
+        list.innerHTML = filtered.map(p => `
+            <div style="background:white; padding:12px; border-radius:10px; margin-bottom:8px; border:1px solid #cbd5e1">
+                <div style="font-weight:bold; margin-bottom:5px">${p.nume}</div>
+                <div style="display:flex; justify-content:space-between; font-size:12px">
+                    <span>Stoc: <b>${Math.floor(p.cant)}c+${Math.round((p.cant % 1) * p.amb)}u</b></span>
+                    <span>Amb: <input type="number" value="${p.amb}" onchange="upd(${p.id},'amb',this.value)" style="width:35px"></span>
+                    <span>Pret: <input type="number" value="${p.pret}" onchange="upd(${p.id},'pret',this.value)" style="width:50px"></span>
+                    <button onclick="del(${p.id})" style="border:none; color:red; background:none">🗑️</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function upd(id, f, v) { await db.produse.update(id, {[f]: parseFloat(v)}); load(); }
+    async function addProd() { await db.produse.add({nume:"Medicament Nou", cant:0, amb:30, pret:0}); load(); }
+    async function del(id) { if(confirm("Ștergi?")) { await db.produse.delete(id); load(); } }
+
+    async function renderHist() {
+        const h = await db.vanzari.reverse().toArray();
+        document.getElementById('histList').innerHTML = h.map(v => `
+            <div style="background:white; padding:10px; border-radius:8px; margin-bottom:5px; border-left:4px solid var(--rx); font-size:11px">
+                <b>${v.data}</b> - Total: ${v.total.toFixed(2)} RON (Compensat: ${v.comp.toFixed(2)})<br>
+                <span style="color:#64748b">${v.detalii}</span>
+            </div>
+        `).join('');
+    }
+
+    async function exportPDF() {
+        const { jsPDF } = window.jspdf; const doc = new jsPDF();
+        const hist = await db.vanzari.toArray();
+        doc.text("Raport Detalii Bon (Document Nefiscal)", 14, 15);
+        doc.autoTable({
+            startY: 20,
+            head: [['Data', 'Detalii Produse', 'Compensat', 'Achitat Pacient']],
+            body: hist.map(v => [v.data, v.detalii, v.comp.toFixed(2), v.total.toFixed(2)])
+        });
+        doc.save(`Raport_RX_${new Date().toLocaleDateString()}.pdf`);
+    }
+
+    // --- IMPORT ---
+    async function importExcel(e) {
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            const json = XLSX.utils.sheet_to_json(XLSX.read(new Uint8Array(ev.target.result), {type:'array'}).Sheets[XLSX.read(new Uint8Array(ev.target.result), {type:'array'}).SheetNames[0]]);
+            if(confirm("Înlocuiești baza de date?")) await db.produse.clear();
+            for(let r of json) {
+                const keys = Object.keys(r);
+                const get = k => r[keys.find(x => x.toLowerCase().includes(k.toLowerCase()))] || "";
+                await db.produse.add({ nume: String(get("nume")||get("produs")), cant: parseFloat(get("stoc")||get("cant")), amb: parseInt(get("amb")||30), pret: parseFloat(get("pret")) });
+            }
+            load();
+        };
+        reader.readAsArrayBuffer(e.target.files[0]);
+    }
+
+    window.onload = load;
+</script>
+</body>
+</html>
